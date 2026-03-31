@@ -1,0 +1,24 @@
+{
+  "name": "ai-receptionist",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "description": "AI Receptionist Platform — world-class AI-powered receptionist for businesses",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "db:generate": "pnpm --filter @ai-receptionist/db generate",
+    "db:push": "pnpm --filter @ai-receptionist/db push",
+    "db:migrate": "pnpm --filter @ai-receptionist/db migrate",
+    "db:studio": "pnpm --filter @ai-receptionist/db studio"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "turbo": "^2.9.1"
+  }
+}

@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Multi-tenant business accounts
+// ============================================
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  industry  String   // maps to IndustryType
+  timezone  String   @default("Europe/Riga")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  config        BusinessConfigRecord?
+  conversations Conversation[]
+  leads         Lead[]
+  services      Service[]
+  faqs          FAQ[]
+  users         UserBusiness[]
+  apiKeys       ApiKey[]
+
+  @@index([slug])
+  @@index([industry])
+}
+
+model BusinessConfigRecord {
+  id         String   @id @default(cuid())
+  businessId String   @unique
+  config     Json     // Full BusinessConfig JSON
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// Authentication & Users
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  role          UserRole  @default(BUSINESS_OWNER)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  businesses UserBusiness[]
+  sessions   Session[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserBusiness {
+  id         String   @id @default(cuid())
+  userId     String
+  businessId String
+  role       BusinessRole @default(ADMIN)
+  createdAt  DateTime     @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  BUSINESS_OWNER
+  STAFF
+}
+
+enum BusinessRole {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+// ============================================
+// Conversations & Messages
+// ============================================
+
+model Conversation {
+  id         String             @id @default(cuid())
+  businessId String
+  channel    String             // voice, chat, sms, whatsapp
+  status     String             @default("active")
+  language   String             @default("en")
+  callerPhone String?
+  metadata   Json?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  messages Message[]
+  lead     Lead?
+
+  @@index([businessId, createdAt])
+  @@index([businessId, status])
+  @@index([callerPhone])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // assistant, user, system
+  content        String
+  language       String   @default("en")
+  metadata       Json?    // intent, confidence, tokens used, etc.
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+// ============================================
+// Lead Management
+// ============================================
+
+model Lead {
+  id             String    @id @default(cuid())
+  businessId     String
+  conversationId String?   @unique
+  name           String?
+  phone          String?
+  email          String?
+  source         String    // channel
+  score          String    @default("warm") // hot, warm, cold
+  status         String    @default("new") // new, contacted, qualified, booked, lost
+  interests      String[]  @default([])
+  timeline       String?
+  notes          String?
+  qualificationData Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  bookings     Booking[]
+
+  @@index([businessId, score])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([phone])
+  @@index([email])
+}
+
+// ============================================
+// Bookings
+// ============================================
+
+model Booking {
+  id              String    @id @default(cuid())
+  businessId      String
+  leadId          String?
+  service         String
+  specialist      String?
+  scheduledAt     DateTime
+  duration        Int       @default(60) // minutes
+  status          String    @default("pending") // pending, confirmed, cancelled, completed
+  customerName    String
+  customerPhone   String
+  customerEmail   String?
+  notes           String?
+  externalId      String?   // ID in external booking system (Alteg, etc.)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  lead Lead? @relation(fields: [leadId], references: [id])
+
+  @@index([businessId, scheduledAt])
+  @@index([status])
+  @@index([externalId])
+}
+
+// ============================================
+// Service Catalog
+// ============================================
+
+model Service {
+  id          String  @id @default(cuid())
+  businessId  String
+  category    String
+  nameEn      String
+  nameLv      String?
+  nameRu      String?
+  descEn      String?
+  descLv      String?
+  descRu      String?
+  priceFrom   Float?
+  priceTo     Float?
+  currency    String  @default("EUR")
+  duration    Int?    // minutes
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, category])
+  @@index([businessId, isActive])
+}
+
+// ============================================
+// FAQ Knowledge Base
+// ============================================
+
+model FAQ {
+  id          String   @id @default(cuid())
+  businessId  String
+  category    String
+  questionEn  String
+  questionLv  String?
+  questionRu  String?
+  answerEn    String
+  answerLv    String?
+  answerRu    String?
+  keywords    String[] @default([])
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, category])
+  @@index([businessId, isActive])
+}
+
+// ============================================
+// Escalation Log
+// ============================================
+
+model Escalation {
+  id             String   @id @default(cuid())
+  businessId     String
+  conversationId String
+  reason         String   // EscalationReason
+  method         String   // sms, email, phone_transfer
+  contactName    String
+  resolved       Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([conversationId])
+}
+
+// ============================================
+// API Keys for widget/external access
+// ============================================
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  businessId String
+  key        String   @unique
+  name       String
+  isActive   Boolean  @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([key])
+}
+
+// ============================================
+// Analytics (daily aggregates)
+// ============================================
+
+model DailyAnalytics {
+  id                   String   @id @default(cuid())
+  businessId           String
+  date                 DateTime @db.Date
+  totalConversations   Int      @default(0)
+  leadsCaptured        Int      @default(0)
+  appointmentsBooked   Int      @default(0)
+  escalations          Int      @default(0)
+  avgResponseTimeMs    Int      @default(0)
+  byChannel            Json     @default("{}")
+  byLanguage           Json     @default("{}")
+  topIntents           Json     @default("[]")
+
+  @@unique([businessId, date])
+  @@index([businessId, date])
+}
