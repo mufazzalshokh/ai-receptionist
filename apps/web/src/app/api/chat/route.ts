@@ -121,13 +121,25 @@ export async function POST(request: NextRequest) {
       },
       error: null,
     });
-  } catch (error) {
-    console.error("Chat API error:", error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Chat API error:", errorMessage);
+
+    // Detect billing/credit errors so admin knows to add credits
+    const isBillingError = errorMessage.includes("credit balance")
+      || errorMessage.includes("billing")
+      || errorMessage.includes("rate_limit");
+
+    const userFacingMessage = isBillingError
+      ? "Our AI assistant is temporarily unavailable. Please call us at +371 23 444 401 or try again later."
+      : "An error occurred processing your message. Please try again or call +371 23 444 401.";
+
     return NextResponse.json(
       {
         success: false,
         data: null,
-        error: "An error occurred processing your message. Please try again.",
+        error: userFacingMessage,
+        _debug: process.env.NODE_ENV === "development" ? errorMessage : undefined,
       },
       { status: 500 }
     );

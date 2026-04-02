@@ -1,3 +1,11 @@
+// ============================================
+// Streaming Engine Adapter
+// Wraps ConversationEngine for streaming Claude responses.
+// Yields text chunks as they arrive from the API,
+// then runs post-processing (intent, lead, escalation)
+// on the full assembled text.
+// ============================================
+
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   BusinessConfig,
@@ -8,18 +16,14 @@ import type {
   DetectedIntent,
   LeadData,
 } from "@ai-receptionist/types";
-import { SystemPromptBuilder } from "./prompt-builder";
-import { IntentDetector } from "./intent-detector";
-import { LanguageDetector } from "./language-detector";
-import { LeadQualifier } from "./lead-qualifier";
+import {
+  SystemPromptBuilder,
+  IntentDetector,
+  LanguageDetector,
+  LeadQualifier,
+} from "@ai-receptionist/core";
 
-interface EngineConfig {
-  readonly anthropicApiKey: string;
-  readonly model?: string;
-  readonly maxTokens?: number;
-}
-
-interface ConversationState {
+export interface ConversationState {
   readonly id: string;
   readonly businessId: string;
   readonly channel: ConversationChannel;
@@ -31,7 +35,13 @@ interface ConversationState {
   readonly createdAt: Date;
 }
 
-interface EngineResponse {
+export interface StreamingEngineConfig {
+  readonly anthropicApiKey: string;
+  readonly model?: string;
+  readonly maxTokens?: number;
+}
+
+export interface StreamingResult {
   readonly message: string;
   readonly language: SupportedLanguage;
   readonly intent: DetectedIntent;
@@ -39,11 +49,10 @@ interface EngineResponse {
   readonly shouldEscalate: boolean;
   readonly escalationReason?: string;
   readonly shouldBook: boolean;
-  readonly bookingDetails?: Record<string, string>;
   readonly tokensUsed: { input: number; output: number };
 }
 
-export class ConversationEngine {
+export class StreamingEngineAdapter {
   private readonly client: Anthropic;
   private readonly promptBuilder: SystemPromptBuilder;
   private readonly intentDetector: IntentDetector;
@@ -52,7 +61,7 @@ export class ConversationEngine {
   private readonly model: string;
   private readonly maxTokens: number;
 
-  constructor(config: EngineConfig) {
+  constructor(config: StreamingEngineConfig) {
     this.client = new Anthropic({ apiKey: config.anthropicApiKey });
     this.promptBuilder = new SystemPromptBuilder();
     this.intentDetector = new IntentDetector();
@@ -62,24 +71,30 @@ export class ConversationEngine {
     this.maxTokens = config.maxTokens ?? 1024;
   }
 
-  async processMessage(
+  /**
+   * Process a message with streaming. Returns an async generator that
+   * yields text chunks as they arrive. After the generator completes,
+   * call getLastResult() for full post-processed result.
+   */
+  async *processMessageStreaming(
     userMessage: string,
     state: ConversationState,
     business: BusinessConfig,
-    knowledgeBase: KnowledgeBase
-  ): Promise<EngineResponse> {
+    knowledgeBase: KnowledgeBase,
+    signal?: AbortSignal
+  ): AsyncGenerator<string, StreamingResult> {
     // 1. Detect language
     const detectedLanguage = this.languageDetector.detect(
       userMessage,
-      business.languages,
+      business.languages as SupportedLanguage[],
       state.language
     );
 
     // 2. Detect intent
     const intent = this.intentDetector.detect(userMessage, detectedLanguage);
 
-    // 3. Check for escalation triggers
-    const shouldEscalate = this.checkEscalationTriggers(
+    // 3. Check escalation
+    const shouldEscalate = this.checkEscalation(
       userMessage,
       intent,
       business,
@@ -100,105 +115,97 @@ export class ConversationEngine {
       }),
     });
 
-    // 5. Build message history for Claude
-    const anthropicMessages = this.buildAnthropicMessages(
-      state.messages,
-      userMessage
-    );
-
-    // 6. Call Claude
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      system: systemPrompt,
-      messages: anthropicMessages,
-    });
-
-    const assistantMessage =
-      response.content[0].type === "text" ? response.content[0].text : "";
-
-    // 7. Extract lead information from conversation
-    const leadUpdate = this.leadQualifier.extractLeadInfo(
-      userMessage,
-      assistantMessage,
-      state.lead
-    );
-
-    // 8. Check if booking intent
-    const shouldBook =
-      intent.intent === "book_appointment" && intent.confidence > 0.7;
-
-    return {
-      message: assistantMessage,
-      language: detectedLanguage,
-      intent,
-      leadUpdate,
-      shouldEscalate,
-      escalationReason: shouldEscalate
-        ? this.getEscalationReason(intent, userMessage)
-        : undefined,
-      shouldBook,
-      tokensUsed: {
-        input: response.usage.input_tokens,
-        output: response.usage.output_tokens,
-      },
-    };
-  }
-
-  private buildAnthropicMessages(
-    history: readonly ConversationMessage[],
-    newUserMessage: string
-  ): Anthropic.MessageParam[] {
-    const messages: Anthropic.MessageParam[] = history
+    // 5. Build messages
+    const messages: Anthropic.MessageParam[] = state.messages
       .filter((m) => m.role !== "system")
       .map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
+    messages.push({ role: "user", content: userMessage });
 
-    messages.push({ role: "user", content: newUserMessage });
+    // 6. Stream from Claude
+    let fullText = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
 
-    return messages;
+    const stream = this.client.messages.stream({
+      model: this.model,
+      max_tokens: this.maxTokens,
+      system: systemPrompt,
+      messages,
+    });
+
+    // Allow abort via signal
+    if (signal) {
+      signal.addEventListener("abort", () => stream.abort(), { once: true });
+    }
+
+    for await (const event of stream) {
+      if (
+        event.type === "content_block_delta" &&
+        event.delta.type === "text_delta"
+      ) {
+        fullText += event.delta.text;
+        yield event.delta.text;
+      }
+    }
+
+    // Get usage from final message
+    const finalMessage = await stream.finalMessage();
+    inputTokens = finalMessage.usage.input_tokens;
+    outputTokens = finalMessage.usage.output_tokens;
+
+    // 7. Post-processing on complete text
+    const leadUpdate = this.leadQualifier.extractLeadInfo(
+      userMessage,
+      fullText,
+      state.lead
+    );
+
+    const shouldBook =
+      intent.intent === "book_appointment" && intent.confidence > 0.7;
+
+    return {
+      message: fullText,
+      language: detectedLanguage,
+      intent,
+      leadUpdate,
+      shouldEscalate,
+      escalationReason: shouldEscalate
+        ? this.getEscalationReason(intent)
+        : undefined,
+      shouldBook,
+      tokensUsed: { input: inputTokens, output: outputTokens },
+    };
   }
 
-  private checkEscalationTriggers(
+  private checkEscalation(
     message: string,
     intent: DetectedIntent,
     business: BusinessConfig,
     language: SupportedLanguage
   ): boolean {
-    // Explicit request for human
     if (intent.intent === "speak_to_human") return true;
-
-    // Urgent medical
     if (intent.intent === "urgent_medical") return true;
 
-    // Check urgent keywords
     const urgentKeywords =
-      business.escalation.urgentKeywords[language] || [];
-    const lowerMessage = message.toLowerCase();
-    const hasUrgentKeyword = urgentKeywords.some((kw) =>
-      lowerMessage.includes(kw.toLowerCase())
-    );
+      business.escalation.urgentKeywords[language] ?? [];
+    const lower = message.toLowerCase();
+    if (urgentKeywords.some((kw: string) => lower.includes(kw.toLowerCase())))
+      return true;
 
-    if (hasUrgentKeyword) return true;
-
-    // Complaint detection
     if (intent.intent === "complaint" && intent.confidence > 0.8) return true;
 
     return false;
   }
 
-  private getEscalationReason(
-    intent: DetectedIntent,
-    _message: string
-  ): string {
-    const reasonMap: Record<string, string> = {
+  private getEscalationReason(intent: DetectedIntent): string {
+    const map: Record<string, string> = {
       speak_to_human: "Customer requested to speak with a human",
       urgent_medical: "Urgent medical situation detected",
       complaint: "Customer complaint — needs personal attention",
     };
-
-    return reasonMap[intent.intent] ?? "Escalation triggered";
+    return map[intent.intent] ?? "Escalation triggered";
   }
 }

@@ -275,6 +275,24 @@ export interface ApiResponse<T> {
   };
 }
 
+// --- Voice Pipeline ---
+
+export type VoiceSessionPhase =
+  | "connecting"
+  | "greeting"
+  | "listening"
+  | "processing"
+  | "responding"
+  | "interrupted"
+  | "escalating"
+  | "ended";
+
+export interface VoiceSessionMetrics {
+  readonly turnCount: number;
+  readonly totalLatencyMs: number;
+  readonly bargeInCount: number;
+}
+
 // --- Widget Configuration ---
 
 export interface WidgetConfig {
