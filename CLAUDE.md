@@ -101,11 +101,14 @@ Attributes: `data-language`, `data-color`, `data-position`, `data-api-url`.
 
 - Core AI engine: complete
 - VividDerm business config + knowledge base: complete
-- Chat API + conversation management: complete
+- Chat API + conversation management: complete (with DB persistence)
 - Dashboard skeleton (stats, conversations, leads, settings): complete
 - Embeddable chat widget: complete
-- Voice pipeline: scaffolded (Twilio routes exist, need Deepgram/TTS integration)
-- Booking integration: scaffolded (Alteg API client exists)
-- Escalation system: scaffolded (SMS/email/webhook handlers exist)
-- Database schema: defined, needs push to Supabase
-- Auth: not yet implemented
+- Voice pipeline: complete (Twilio Media Streams + Deepgram STT + ElevenLabs TTS, 41 tests)
+- Booking integration: scaffolded (Alteg API client exists, not wired to AI engine)
+- Escalation system: complete (SMS/email/webhook, wired to chat route)
+- Database schema: pushed to Supabase, seeded with VividDerm data
+- Auth: complete (NextAuth v5, credentials, JWT sessions, middleware)
+- Rate limiting: complete (20/min per IP on /api/chat)
+- CORS: complete (widget endpoints)
+- Security: Twilio signature validation, WS auth, env validation, PII masking
