@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: "grid" },
@@ -7,11 +10,19 @@ const navItems = [
   { href: "/dashboard/settings", label: "Settings", icon: "settings" },
 ];
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await auth();
+
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const userInitial = (session.user.name?.[0] ?? session.user.email?.[0] ?? "U").toUpperCase();
+
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
@@ -39,14 +50,21 @@ export default function DashboardLayout({
         </nav>
 
         <div className="border-t border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-600">
-              V
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-600">
+                {userInitial}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-900">
+                  {session.user.name ?? session.user.email}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {session.user.role ?? "Owner"}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-slate-900">VIVIDERM</p>
-              <p className="text-xs text-slate-500">Active</p>
-            </div>
+            <SignOutButton />
           </div>
         </div>
       </aside>

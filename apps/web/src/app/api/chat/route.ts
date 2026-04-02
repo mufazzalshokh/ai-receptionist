@@ -5,6 +5,8 @@ import { vividermConfig, vividermKnowledgeBase } from "@ai-receptionist/config";
 import type { SupportedLanguage, ConversationChannel } from "@ai-receptionist/types";
 import { conversationStore } from "@/lib/conversation-store";
 import { isAfterHours, generateId } from "@/lib/utils";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { triggerEscalation } from "@/lib/escalation";
 
 const engine = new ConversationEngine({
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
@@ -19,14 +21,28 @@ const messageSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  // Rate limit: 20 messages per minute per IP
+  const clientIp = getClientIp(request.headers);
+  const rateLimitResult = rateLimit(`chat:${clientIp}`, 20, 60_000);
+
+  if (!rateLimitResult.success) {
+    const resp = jsonResponse(
+      { success: false, data: null, error: "Too many requests. Please wait a moment." },
+      429
+    );
+    resp.headers.set("Retry-After", String(Math.ceil(rateLimitResult.resetMs / 1000)));
+    resp.headers.set("X-RateLimit-Remaining", "0");
+    return resp;
+  }
+
   try {
     const body = await request.json();
     const parsed = messageSchema.safeParse(body);
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return jsonResponse(
         { success: false, data: null, error: "Invalid request body" },
-        { status: 400 }
+        400
       );
     }
 
@@ -109,7 +125,24 @@ export async function POST(request: NextRequest) {
     }
     conversationStore.addIntent(session.id, response.intent);
 
-    return NextResponse.json({
+    // Trigger escalation if needed (async, non-blocking)
+    if (response.shouldEscalate) {
+      void triggerEscalation(
+        {
+          businessId: session.businessId,
+          conversationId: session.id,
+          reason: (response.escalationReason ?? "customer_request") as import("@ai-receptionist/types").EscalationReason,
+          customerName: session.lead.name,
+          customerPhone: session.lead.phone,
+          summary: message,
+          language: response.language,
+          channel: session.channel,
+        },
+        business
+      ).catch(() => {});
+    }
+
+    return jsonResponse({
       success: true,
       data: {
         conversationId: session.id,
@@ -123,7 +156,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Chat API error:", errorMessage);
+    // In production, replace with structured logger (pino/winston)
+    if (process.env.NODE_ENV === "development") {
+      console.error("Chat API error:", errorMessage);
+    }
 
     // Detect billing/credit errors so admin knows to add credits
     const isBillingError = errorMessage.includes("credit balance")
@@ -134,19 +170,30 @@ export async function POST(request: NextRequest) {
       ? "Our AI assistant is temporarily unavailable. Please call us at +371 23 444 401 or try again later."
       : "An error occurred processing your message. Please try again or call +371 23 444 401.";
 
-    return NextResponse.json(
+    return jsonResponse(
       {
         success: false,
         data: null,
         error: userFacingMessage,
         _debug: process.env.NODE_ENV === "development" ? errorMessage : undefined,
       },
-      { status: 500 }
+      500
     );
   }
 }
 
-// Handle CORS preflight
+// CORS headers for widget embedding
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+function jsonResponse(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, { status, headers: corsHeaders });
+}
+
 export async function OPTIONS() {
-  return new NextResponse(null, { status: 204 });
+  return new NextResponse(null, { status: 204, headers: corsHeaders });
 }

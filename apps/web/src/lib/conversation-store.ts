@@ -5,23 +5,24 @@ import type {
   LeadData,
   DetectedIntent,
 } from "@ai-receptionist/types";
+import { prisma } from "@ai-receptionist/db";
 
 /**
- * In-memory conversation store for MVP.
- * Production: replace with Redis (Upstash) + PostgreSQL persistence.
+ * Hybrid conversation store: in-memory cache for active sessions,
+ * with async Prisma DB persistence for durability.
  */
 
 interface ConversationSession {
-  id: string;
-  businessId: string;
-  channel: ConversationChannel;
-  language: SupportedLanguage;
-  messages: ConversationMessage[];
-  lead: Partial<LeadData>;
-  detectedIntents: DetectedIntent[];
-  isAfterHours: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  readonly id: string;
+  readonly businessId: string;
+  readonly channel: ConversationChannel;
+  readonly language: SupportedLanguage;
+  readonly messages: ConversationMessage[];
+  readonly lead: Partial<LeadData>;
+  readonly detectedIntents: DetectedIntent[];
+  readonly isAfterHours: boolean;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 class ConversationStore {
@@ -43,6 +44,12 @@ class ConversationStore {
       updatedAt: new Date(),
     };
     this.sessions.set(params.id, session);
+
+    // Persist to DB asynchronously
+    void this.persistConversation(session).catch(() => {
+      // DB persistence is best-effort in MVP
+    });
+
     return session;
   }
 
@@ -54,13 +61,15 @@ class ConversationStore {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    // Immutable update
     const updated: ConversationSession = {
       ...session,
       messages: [...session.messages, message],
       updatedAt: new Date(),
     };
     this.sessions.set(sessionId, updated);
+
+    // Persist message to DB
+    void this.persistMessage(sessionId, message).catch(() => {});
   }
 
   updateLead(sessionId: string, leadUpdate: Partial<LeadData>): void {
@@ -73,6 +82,9 @@ class ConversationStore {
       updatedAt: new Date(),
     };
     this.sessions.set(sessionId, updated);
+
+    // Persist lead to DB
+    void this.persistLead(sessionId, updated.lead, updated.businessId).catch(() => {});
   }
 
   updateLanguage(sessionId: string, language: SupportedLanguage): void {
@@ -85,6 +97,11 @@ class ConversationStore {
       updatedAt: new Date(),
     };
     this.sessions.set(sessionId, updated);
+
+    void prisma.conversation.update({
+      where: { id: sessionId },
+      data: { language },
+    }).catch(() => {});
   }
 
   addIntent(sessionId: string, intent: DetectedIntent): void {
@@ -105,7 +122,6 @@ class ConversationStore {
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
   }
 
-  // Cleanup sessions older than 24h
   cleanup(): void {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     for (const [id, session] of this.sessions) {
@@ -113,6 +129,82 @@ class ConversationStore {
         this.sessions.delete(id);
       }
     }
+  }
+
+  // --- DB Persistence ---
+
+  private async persistConversation(session: ConversationSession): Promise<void> {
+    // Find business by slug (config uses slug as id)
+    const business = await prisma.business.findUnique({
+      where: { slug: session.businessId },
+    });
+
+    if (!business) return;
+
+    await prisma.conversation.create({
+      data: {
+        id: session.id,
+        businessId: business.id,
+        channel: session.channel,
+        language: session.language,
+        status: "active",
+      },
+    });
+  }
+
+  private async persistMessage(conversationId: string, message: ConversationMessage): Promise<void> {
+    await prisma.message.create({
+      data: {
+        conversationId,
+        role: message.role,
+        content: message.content,
+        language: message.language,
+        metadata: message.metadata ? JSON.parse(JSON.stringify(message.metadata)) : undefined,
+      },
+    });
+  }
+
+  private async persistLead(
+    conversationId: string,
+    lead: Partial<LeadData>,
+    businessSlug: string
+  ): Promise<void> {
+    const business = await prisma.business.findUnique({
+      where: { slug: businessSlug },
+    });
+
+    if (!business) return;
+
+    // Only create/update lead if we have meaningful data
+    if (!lead.name && !lead.phone && !lead.email) return;
+
+    await prisma.lead.upsert({
+      where: { conversationId },
+      update: {
+        name: lead.name ?? undefined,
+        phone: lead.phone ?? undefined,
+        email: lead.email ?? undefined,
+        score: lead.score ?? "warm",
+        status: lead.status ?? "new",
+        interests: lead.interests ? [...lead.interests] : [],
+        notes: lead.notes ?? undefined,
+        qualificationData: lead.qualificationAnswers
+          ? JSON.parse(JSON.stringify(lead.qualificationAnswers))
+          : undefined,
+      },
+      create: {
+        businessId: business.id,
+        conversationId,
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        source: lead.source ?? "chat",
+        score: lead.score ?? "warm",
+        status: lead.status ?? "new",
+        interests: lead.interests ? [...lead.interests] : [],
+        notes: lead.notes ?? "",
+      },
+    });
   }
 }
 
