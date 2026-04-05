@@ -60,7 +60,7 @@ describe("Table Existence", () => {
 
   it.each(EXPECTED_TABLES)("table %s should be queryable via Prisma", async (table) => {
     // Prisma model names are camelCase delegates on the client
-    const delegate = (prisma as Record<string, unknown>)[
+    const delegate = (prisma as unknown as Record<string, unknown>)[
       table.charAt(0).toLowerCase() + table.slice(1)
     ] as { count: () => Promise<number> };
 
