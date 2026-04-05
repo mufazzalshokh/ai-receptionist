@@ -126,8 +126,6 @@ export class StreamingEngineAdapter {
 
     // 6. Stream from Claude
     let fullText = "";
-    let inputTokens = 0;
-    let outputTokens = 0;
 
     const stream = this.client.messages.stream({
       model: this.model,
@@ -153,8 +151,7 @@ export class StreamingEngineAdapter {
 
     // Get usage from final message
     const finalMessage = await stream.finalMessage();
-    inputTokens = finalMessage.usage.input_tokens;
-    outputTokens = finalMessage.usage.output_tokens;
+    const { input_tokens, output_tokens } = finalMessage.usage;
 
     // 7. Post-processing on complete text
     const leadUpdate = this.leadQualifier.extractLeadInfo(
@@ -176,7 +173,7 @@ export class StreamingEngineAdapter {
         ? this.getEscalationReason(intent)
         : undefined,
       shouldBook,
-      tokensUsed: { input: inputTokens, output: outputTokens },
+      tokensUsed: { input: input_tokens, output: output_tokens },
     };
   }
 

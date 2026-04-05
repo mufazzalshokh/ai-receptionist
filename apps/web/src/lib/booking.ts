@@ -1,4 +1,7 @@
 import type { BookingRequest, BookingSlot } from "@ai-receptionist/types";
+import { createModuleLogger } from "@/lib/logger";
+
+const log = createModuleLogger("booking");
 
 /**
  * Alteg Booking Integration
@@ -21,7 +24,7 @@ export async function getAvailableSlots(
   const apiKey = process.env.ALTEG_API_KEY;
 
   if (!apiKey) {
-    console.warn("[Booking] Alteg API not configured");
+    log.warn("Alteg API not configured");
     return [];
   }
 
@@ -42,7 +45,7 @@ export async function getAvailableSlots(
     );
 
     if (!response.ok) {
-      console.error("[Booking] Alteg API error:", response.status);
+      log.error({ status: response.status }, "Alteg API error fetching slots");
       return [];
     }
 
@@ -58,7 +61,7 @@ export async function getAvailableSlots(
       })
     );
   } catch (error) {
-    console.error("[Booking] Failed to fetch slots:", error);
+    log.error({ err: error }, "Failed to fetch booking slots");
     return [];
   }
 }
@@ -67,11 +70,16 @@ export async function createBookingRequest(
   request: BookingRequest
 ): Promise<{ success: boolean; bookingId?: string }> {
   const apiKey = process.env.ALTEG_API_KEY;
-  const companyId = process.env.ALTEG_COMPANY_ID ?? "757934";
+  const companyId = process.env.ALTEG_COMPANY_ID;
+
+  if (!companyId) {
+    log.info({ request }, "Booking request captured (no company ID, manual processing)");
+    return { success: true, bookingId: `manual-${Date.now()}` };
+  }
 
   if (!apiKey) {
     // Fallback: log the booking request for manual processing
-    console.log("[Booking] Request (no API key):", JSON.stringify(request));
+    log.info({ request }, "Booking request captured (no API key, manual processing)");
     return {
       success: true,
       bookingId: `manual-${Date.now()}`,
@@ -100,7 +108,7 @@ export async function createBookingRequest(
     );
 
     if (!response.ok) {
-      console.error("[Booking] Alteg create error:", response.status);
+      log.error({ status: response.status }, "Alteg API error creating booking");
       return { success: false };
     }
 
@@ -110,7 +118,7 @@ export async function createBookingRequest(
       bookingId: data.data?.record_id?.toString(),
     };
   } catch (error) {
-    console.error("[Booking] Failed to create booking:", error);
+    log.error({ err: error }, "Failed to create booking");
     return { success: false };
   }
 }
@@ -128,7 +136,7 @@ export async function notifyStaffOfBooking(
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
-    console.log("[Booking] Staff notification (no Twilio):", JSON.stringify(request));
+    log.info({ request }, "Staff booking notification (no Twilio, logged for manual processing)");
     return true;
   }
 
@@ -162,7 +170,7 @@ export async function notifyStaffOfBooking(
 
     return response.ok;
   } catch (error) {
-    console.error("[Booking] Staff notification failed:", error);
+    log.error({ err: error }, "Staff booking notification failed");
     return false;
   }
 }

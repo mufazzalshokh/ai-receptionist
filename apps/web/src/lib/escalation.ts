@@ -1,4 +1,7 @@
 import type { BusinessConfig, EscalationReason, SupportedLanguage } from "@ai-receptionist/types";
+import { createModuleLogger } from "@/lib/logger";
+
+const log = createModuleLogger("escalation");
 
 interface EscalationPayload {
   businessId: string;
@@ -19,7 +22,7 @@ export async function triggerEscalation(
   const contact = escalation.contacts.find((c) => c.onCall) ?? escalation.contacts[0];
 
   if (!contact) {
-    console.error("[Escalation] No contacts configured for", business.id);
+    log.error({ businessId: business.id }, "No contacts configured");
     return { success: false, method: "none" };
   }
 
@@ -41,7 +44,7 @@ export async function triggerEscalation(
     if (sent) return { success: true, method: "webhook" };
   }
 
-  console.error("[Escalation] All methods failed for", business.id);
+  log.error({ businessId: business.id }, "All escalation methods failed");
   return { success: false, method: "none" };
 }
 
@@ -54,7 +57,7 @@ async function sendSmsEscalation(
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
-    console.warn("[Escalation] Twilio not configured, skipping SMS");
+    log.warn("Twilio not configured, skipping SMS");
     return false;
   }
 
@@ -89,7 +92,7 @@ async function sendSmsEscalation(
 
     return response.ok;
   } catch (error) {
-    console.error("[Escalation] SMS failed:", error);
+    log.error({ err: error }, "SMS escalation failed");
     return false;
   }
 }
@@ -101,7 +104,7 @@ async function sendEmailEscalation(
   const resendKey = process.env.RESEND_API_KEY;
 
   if (!resendKey) {
-    console.warn("[Escalation] Resend not configured, skipping email");
+    log.warn("Resend not configured, skipping email");
     return false;
   }
 
@@ -113,32 +116,68 @@ async function sendEmailEscalation(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "AI Receptionist <noreply@your-domain.com>",
+        from: `AI Receptionist <${process.env.ESCALATION_FROM_EMAIL ?? "noreply@your-domain.com"}>`,
         to: email,
-        subject: `[Urgent] ${payload.reason} — ${payload.customerName ?? "Customer"}`,
+        subject: `[Urgent] ${escapeHtml(payload.reason)} — ${escapeHtml(payload.customerName ?? "Customer")}`,
         html: `
           <h2>Escalation Alert</h2>
-          <p><strong>Reason:</strong> ${payload.reason}</p>
-          <p><strong>Customer:</strong> ${payload.customerName ?? "Unknown"}</p>
-          <p><strong>Phone:</strong> ${payload.customerPhone ?? "Not provided"}</p>
-          <p><strong>Summary:</strong> ${payload.summary}</p>
-          <p><strong>Channel:</strong> ${payload.channel}</p>
-          <p><strong>Language:</strong> ${payload.language}</p>
+          <p><strong>Reason:</strong> ${escapeHtml(payload.reason)}</p>
+          <p><strong>Customer:</strong> ${escapeHtml(payload.customerName ?? "Unknown")}</p>
+          <p><strong>Phone:</strong> ${escapeHtml(payload.customerPhone ?? "Not provided")}</p>
+          <p><strong>Summary:</strong> ${escapeHtml(payload.summary)}</p>
+          <p><strong>Channel:</strong> ${escapeHtml(payload.channel)}</p>
+          <p><strong>Language:</strong> ${escapeHtml(payload.language)}</p>
         `,
       }),
     });
 
     return response.ok;
   } catch (error) {
-    console.error("[Escalation] Email failed:", error);
+    log.error({ err: error }, "Email escalation failed");
     return false;
   }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function sendWebhookEscalation(
   payload: EscalationPayload
 ): Promise<boolean> {
-  // Generic webhook — can connect to Slack, Zapier, etc.
-  console.log("[Escalation] Webhook payload:", JSON.stringify(payload));
-  return true;
+  const webhookUrl = process.env.ESCALATION_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    log.warn("No ESCALATION_WEBHOOK_URL configured, skipping webhook");
+    return false;
+  }
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "escalation",
+        ...payload,
+        timestamp: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      log.error({ status: response.status, url: webhookUrl }, "Webhook returned error");
+      return false;
+    }
+
+    log.info({ url: webhookUrl }, "Webhook escalation sent");
+    return true;
+  } catch (error) {
+    log.error({ err: error }, "Webhook escalation failed");
+    return false;
+  }
 }

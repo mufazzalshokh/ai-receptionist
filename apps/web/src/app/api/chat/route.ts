@@ -7,6 +7,10 @@ import { conversationStore } from "@/lib/conversation-store";
 import { isAfterHours, generateId } from "@/lib/utils";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { triggerEscalation } from "@/lib/escalation";
+import { createBookingRequest, notifyStaffOfBooking } from "@/lib/booking";
+import { createModuleLogger } from "@/lib/logger";
+
+const log = createModuleLogger("chat");
 
 const engine = new ConversationEngine({
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
@@ -21,6 +25,8 @@ const messageSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const requestOrigin = request.headers.get("origin");
+
   // Rate limit: 20 messages per minute per IP
   const clientIp = getClientIp(request.headers);
   const rateLimitResult = rateLimit(`chat:${clientIp}`, 20, 60_000);
@@ -28,7 +34,8 @@ export async function POST(request: NextRequest) {
   if (!rateLimitResult.success) {
     const resp = jsonResponse(
       { success: false, data: null, error: "Too many requests. Please wait a moment." },
-      429
+      429,
+      requestOrigin
     );
     resp.headers.set("Retry-After", String(Math.ceil(rateLimitResult.resetMs / 1000)));
     resp.headers.set("X-RateLimit-Remaining", "0");
@@ -42,7 +49,8 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return jsonResponse(
         { success: false, data: null, error: "Invalid request body" },
-        400
+        400,
+        requestOrigin
       );
     }
 
@@ -142,24 +150,52 @@ export async function POST(request: NextRequest) {
       ).catch(() => {});
     }
 
-    return jsonResponse({
-      success: true,
-      data: {
+    // Handle booking intent (async, non-blocking)
+    let bookingResult: { success: boolean; bookingId?: string } | null = null;
+    if (response.shouldBook && session.lead.name && session.lead.phone) {
+      const bookingRequest = {
         conversationId: session.id,
-        message: response.message,
-        language: response.language,
-        intent: response.intent.intent,
-        shouldEscalate: response.shouldEscalate,
-        escalationReason: response.escalationReason,
+        customerName: session.lead.name,
+        customerPhone: session.lead.phone,
+        customerEmail: session.lead.email,
+        service: response.bookingDetails?.service ?? session.lead.interests?.[0] ?? "Consultation",
+        preferredDate: response.bookingDetails?.date,
+        preferredTime: response.bookingDetails?.time,
+        notes: `AI-booked via ${session.channel}. Language: ${response.language}`,
+      };
+
+      bookingResult = await createBookingRequest(bookingRequest).catch(() => null);
+
+      // Notify staff about the booking request
+      if (business.escalation.contacts[0]?.phone) {
+        void notifyStaffOfBooking(
+          bookingRequest,
+          business.escalation.contacts[0].phone
+        ).catch(() => {});
+      }
+    }
+
+    return jsonResponse(
+      {
+        success: true,
+        data: {
+          conversationId: session.id,
+          message: response.message,
+          language: response.language,
+          intent: response.intent.intent,
+          shouldEscalate: response.shouldEscalate,
+          escalationReason: response.escalationReason,
+          bookingCreated: bookingResult?.success ?? false,
+          bookingId: bookingResult?.bookingId ?? null,
+        },
+        error: null,
       },
-      error: null,
-    });
+      200,
+      requestOrigin
+    );
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    // In production, replace with structured logger (pino/winston)
-    if (process.env.NODE_ENV === "development") {
-      console.error("Chat API error:", errorMessage);
-    }
+    log.error({ err: errorMessage }, "Chat API error");
 
     // Detect billing/credit errors so admin knows to add credits
     const isBillingError = errorMessage.includes("credit balance")
@@ -177,23 +213,36 @@ export async function POST(request: NextRequest) {
         error: userFacingMessage,
         _debug: process.env.NODE_ENV === "development" ? errorMessage : undefined,
       },
-      500
+      500,
+      requestOrigin
     );
   }
 }
 
 // CORS headers for widget embedding
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? "*").split(",").map((o) => o.trim());
 
-function jsonResponse(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: corsHeaders });
+function getCorsHeaders(requestOrigin: string | null): Record<string, string> {
+  const origin =
+    ALLOWED_ORIGINS.includes("*")
+      ? "*"
+      : ALLOWED_ORIGINS.includes(requestOrigin ?? "")
+        ? requestOrigin!
+        : ALLOWED_ORIGINS[0];
+
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+  };
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: corsHeaders });
+function jsonResponse(body: unknown, status = 200, requestOrigin: string | null = null): NextResponse {
+  return NextResponse.json(body, { status, headers: getCorsHeaders(requestOrigin) });
+}
+
+export async function OPTIONS(request: NextRequest) {
+  const origin = request.headers.get("origin");
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(origin) });
 }

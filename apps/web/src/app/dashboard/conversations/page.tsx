@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface ConversationSummary {
   id: string;
@@ -54,7 +55,8 @@ export default function ConversationsPage() {
       ) : (
         <div className="space-y-3">
           {conversations.map((conv) => (
-            <Card key={conv.id} className="cursor-pointer transition-shadow hover:shadow-md">
+            <Link key={conv.id} href={`/dashboard/conversations/${conv.id}`}>
+            <Card className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-600">
@@ -84,6 +86,7 @@ export default function ConversationsPage() {
                 </div>
               </CardContent>
             </Card>
+            </Link>
           ))}
         </div>
       )}

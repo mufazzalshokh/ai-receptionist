@@ -321,7 +321,7 @@ export class VoiceSession {
       businessId: this.state.businessId,
       channel: "voice",
       language: this.state.language,
-      messages: [...this.state.messages] as ConversationMessage[],
+      messages: [...this.state.messages],
       lead: this.state.lead,
       detectedIntents: [...this.state.detectedIntents],
       isAfterHours: this.state.isAfterHours,

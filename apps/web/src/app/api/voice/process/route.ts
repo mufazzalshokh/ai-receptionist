@@ -3,6 +3,9 @@ import { ConversationEngine } from "@ai-receptionist/core";
 import { vividermConfig, vividermKnowledgeBase } from "@ai-receptionist/config";
 import { conversationStore } from "@/lib/conversation-store";
 import { isAfterHours, generateId } from "@/lib/utils";
+import { createModuleLogger } from "@/lib/logger";
+
+const log = createModuleLogger("voice-process");
 
 const engine = new ConversationEngine({
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
@@ -16,10 +19,10 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const speechResult = formData.get("SpeechResult") as string ?? "";
   const callSid = formData.get("CallSid") as string ?? "";
-  const callerPhone = formData.get("From") as string ?? "unknown";
+  const _callerPhone = formData.get("From") as string ?? "unknown";
   const confidence = parseFloat(formData.get("Confidence") as string ?? "0");
 
-  console.log(`[Voice] Speech: "${speechResult}" (confidence: ${confidence}), SID: ${callSid}`);
+  log.info({ speechResult, confidence, callSid }, "Voice speech received");
 
   if (!speechResult) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -118,7 +121,7 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/xml" },
     });
   } catch (error) {
-    console.error("[Voice] Processing error:", error);
+    log.error({ err: error }, "Voice processing error");
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">I'm sorry, I encountered an issue. Please call us directly at +371 23 444 401. Goodbye!</Say>

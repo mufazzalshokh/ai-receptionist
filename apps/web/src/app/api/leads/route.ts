@@ -1,27 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { conversationStore } from "@/lib/conversation-store";
+import { prisma } from "@ai-receptionist/db";
 
 export async function GET(request: NextRequest) {
-  const businessId = request.nextUrl.searchParams.get("businessId") ?? "vividerm";
+  const businessSlug = request.nextUrl.searchParams.get("businessId") ?? "vividerm";
+  const page = Math.max(1, parseInt(request.nextUrl.searchParams.get("page") ?? "1", 10));
+  const limit = Math.min(100, Math.max(1, parseInt(request.nextUrl.searchParams.get("limit") ?? "50", 10)));
+  const offset = (page - 1) * limit;
 
-  const conversations = conversationStore.listByBusiness(businessId);
+  const business = await prisma.business.findUnique({
+    where: { slug: businessSlug },
+    select: { id: true },
+  });
 
-  // Extract leads that have at least a name or phone
-  const leads = conversations
-    .filter((c) => c.lead.name || c.lead.phone || c.lead.email)
-    .map((c) => ({
-      conversationId: c.id,
-      ...c.lead,
-      channel: c.channel,
-      language: c.language,
-      messageCount: c.messages.length,
-      lastActivity: c.updatedAt,
-    }));
+  if (!business) {
+    return NextResponse.json(
+      { success: false, data: null, error: "Business not found" },
+      { status: 404 }
+    );
+  }
+
+  const [leads, total] = await Promise.all([
+    prisma.lead.findMany({
+      where: { businessId: business.id },
+      orderBy: { updatedAt: "desc" },
+      skip: offset,
+      take: limit,
+      include: {
+        conversation: {
+          select: {
+            channel: true,
+            language: true,
+            _count: { select: { messages: true } },
+          },
+        },
+      },
+    }),
+    prisma.lead.count({ where: { businessId: business.id } }),
+  ]);
+
+  const data = leads.map((lead) => ({
+    id: lead.id,
+    conversationId: lead.conversationId,
+    name: lead.name,
+    phone: lead.phone,
+    email: lead.email,
+    source: lead.source,
+    score: lead.score,
+    status: lead.status,
+    interests: lead.interests,
+    notes: lead.notes,
+    channel: lead.conversation?.channel ?? null,
+    language: lead.conversation?.language ?? null,
+    messageCount: lead.conversation?._count.messages ?? 0,
+    createdAt: lead.createdAt,
+    updatedAt: lead.updatedAt,
+  }));
 
   return NextResponse.json({
     success: true,
-    data: leads,
+    data,
     error: null,
-    metadata: { total: leads.length },
+    meta: { total, page, limit },
   });
 }

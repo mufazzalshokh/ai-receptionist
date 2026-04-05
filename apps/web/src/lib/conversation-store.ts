@@ -6,6 +6,9 @@ import type {
   DetectedIntent,
 } from "@ai-receptionist/types";
 import { prisma } from "@ai-receptionist/db";
+import { createModuleLogger } from "@/lib/logger";
+
+const log = createModuleLogger("conversation-store");
 
 /**
  * Hybrid conversation store: in-memory cache for active sessions,
@@ -46,8 +49,8 @@ class ConversationStore {
     this.sessions.set(params.id, session);
 
     // Persist to DB asynchronously
-    void this.persistConversation(session).catch(() => {
-      // DB persistence is best-effort in MVP
+    void this.persistConversation(session).catch((err) => {
+      log.debug({ err, sessionId: session.id }, "DB persist conversation failed (best-effort)");
     });
 
     return session;
@@ -69,7 +72,9 @@ class ConversationStore {
     this.sessions.set(sessionId, updated);
 
     // Persist message to DB
-    void this.persistMessage(sessionId, message).catch(() => {});
+    void this.persistMessage(sessionId, message).catch((err) => {
+      log.debug({ err, sessionId }, "DB persist message failed (best-effort)");
+    });
   }
 
   updateLead(sessionId: string, leadUpdate: Partial<LeadData>): void {
@@ -84,7 +89,9 @@ class ConversationStore {
     this.sessions.set(sessionId, updated);
 
     // Persist lead to DB
-    void this.persistLead(sessionId, updated.lead, updated.businessId).catch(() => {});
+    void this.persistLead(sessionId, updated.lead, updated.businessId).catch((err) => {
+      log.debug({ err, sessionId }, "DB persist lead failed (best-effort)");
+    });
   }
 
   updateLanguage(sessionId: string, language: SupportedLanguage): void {
@@ -101,7 +108,9 @@ class ConversationStore {
     void prisma.conversation.update({
       where: { id: sessionId },
       data: { language },
-    }).catch(() => {});
+    }).catch((err) => {
+      log.debug({ err, sessionId }, "DB update language failed (best-effort)");
+    });
   }
 
   addIntent(sessionId: string, intent: DetectedIntent): void {
@@ -124,10 +133,14 @@ class ConversationStore {
 
   cleanup(): void {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const staleIds: string[] = [];
     for (const [id, session] of this.sessions) {
       if (session.updatedAt.getTime() < cutoff) {
-        this.sessions.delete(id);
+        staleIds.push(id);
       }
+    }
+    for (const id of staleIds) {
+      this.sessions.delete(id);
     }
   }
 

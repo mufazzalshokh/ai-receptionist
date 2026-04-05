@@ -219,7 +219,7 @@ When escalating, ALWAYS:
 ## CRITICAL: Never trap a customer. If they want a human, connect them immediately.`;
   }
 
-  private buildLeadCaptureSection(ctx: PromptContext): string {
+  private buildLeadCaptureSection(_ctx: PromptContext): string {
     return `# Lead Capture
 
 Your secondary goal (after helping the customer) is to capture their contact information naturally.

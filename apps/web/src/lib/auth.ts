@@ -67,7 +67,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.sub!;
+        session.user.id = token.sub ?? "";
         session.user.role = token.role as string | undefined;
         session.user.businessId = token.businessId as string | null | undefined;
         session.user.businessSlug = token.businessSlug as string | null | undefined;

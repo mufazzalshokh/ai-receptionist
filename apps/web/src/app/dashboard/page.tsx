@@ -1,7 +1,34 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
+import { prisma } from "@ai-receptionist/db";
 
-export default function DashboardPage() {
+async function getStats() {
+  const business = await prisma.business.findUnique({
+    where: { slug: "vividerm" },
+    select: { id: true },
+  });
+
+  if (!business) {
+    return { conversations: 0, conversationsToday: 0, leads: 0, hotLeads: 0, escalations: 0 };
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const [conversations, conversationsToday, leads, hotLeads, escalations] = await Promise.all([
+    prisma.conversation.count({ where: { businessId: business.id } }),
+    prisma.conversation.count({ where: { businessId: business.id, createdAt: { gte: todayStart } } }),
+    prisma.lead.count({ where: { businessId: business.id } }),
+    prisma.lead.count({ where: { businessId: business.id, score: "hot" } }),
+    prisma.escalation.count({ where: { businessId: business.id } }),
+  ]);
+
+  return { conversations, conversationsToday, leads, hotLeads, escalations };
+}
+
+export default async function DashboardPage() {
+  const stats = await getStats();
+
   return (
     <div>
       <div className="mb-8">
@@ -15,27 +42,23 @@ export default function DashboardPage() {
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Conversations Today"
-          value="—"
-          subtitle="Connect your first channel"
-          trend="neutral"
+          value={String(stats.conversationsToday)}
+          subtitle={`${stats.conversations} total`}
         />
         <StatCard
           title="Leads Captured"
-          value="—"
-          subtitle="Start chatting to capture leads"
-          trend="neutral"
+          value={String(stats.leads)}
+          subtitle={stats.hotLeads > 0 ? `${stats.hotLeads} hot leads` : "No hot leads yet"}
         />
         <StatCard
           title="Appointments Booked"
-          value="—"
-          subtitle="Booking integration ready"
-          trend="neutral"
+          value="0"
+          subtitle="Booking integration pending"
         />
         <StatCard
           title="Escalations"
-          value="0"
-          subtitle="No urgent escalations"
-          trend="good"
+          value={String(stats.escalations)}
+          subtitle={stats.escalations === 0 ? "No escalations" : "Review in conversations"}
         />
       </div>
 
@@ -81,7 +104,6 @@ export default function DashboardPage() {
               <ChecklistItem done label="Services & pricing loaded" />
               <ChecklistItem done label="FAQ knowledge base created" />
               <ChecklistItem done label="Multi-language support (EN/LV/RU)" />
-              <ChecklistItem label="Connect Anthropic API key" />
               <ChecklistItem label="Embed chat widget on website" />
               <ChecklistItem label="Connect phone number (Twilio)" />
               <ChecklistItem label="Set up booking integration (Alteg)" />
@@ -102,7 +124,6 @@ function StatCard({
   title: string;
   value: string;
   subtitle: string;
-  trend: "good" | "bad" | "neutral";
 }) {
   return (
     <Card>

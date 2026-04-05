@@ -48,15 +48,25 @@ export function handleMediaStreamConnection(
           }
           const voiceConfig = getDefaultVoiceConfig(businessId);
 
+          const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+          const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
+          const elevenlabsApiKey = process.env.ELEVENLABS_API_KEY;
+
+          if (!anthropicApiKey || !deepgramApiKey || !elevenlabsApiKey) {
+            logger.error("Missing required API keys (ANTHROPIC, DEEPGRAM, or ELEVENLABS)");
+            ws.close(1011, "Server misconfigured");
+            return;
+          }
+
           session = new VoiceSession({
             callSid,
             ws,
             business,
             knowledgeBase,
             voiceConfig,
-            anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
-            deepgramApiKey: process.env.DEEPGRAM_API_KEY!,
-            elevenlabsApiKey: process.env.ELEVENLABS_API_KEY!,
+            anthropicApiKey,
+            deepgramApiKey,
+            elevenlabsApiKey,
           });
 
           sessionManager.add(callSid, session);

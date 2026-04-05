@@ -12,8 +12,8 @@ const MULAW_DECODE_TABLE = new Int16Array(256);
 for (let i = 0; i < 256; i++) {
   const mulaw = (~i) & 0xff; // mask to 8 bits — JS bitwise NOT returns 32-bit signed
   const sign = mulaw & 0x80;
-  let exponent = (mulaw >> 4) & 0x07;
-  let mantissa = mulaw & 0x0f;
+  const exponent = (mulaw >> 4) & 0x07;
+  const mantissa = mulaw & 0x0f;
 
   let sample = (mantissa << 4) + MULAW_BIAS;
   sample <<= exponent;

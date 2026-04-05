@@ -19,11 +19,17 @@ function cleanup(windowMs: number): void {
   lastCleanup = now;
 
   const cutoff = now - windowMs;
+  const keysToDelete: string[] = [];
   for (const [key, entry] of store) {
-    entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
-    if (entry.timestamps.length === 0) {
-      store.delete(key);
+    const filtered = entry.timestamps.filter((t) => t > cutoff);
+    if (filtered.length === 0) {
+      keysToDelete.push(key);
+    } else {
+      store.set(key, { timestamps: filtered });
     }
+  }
+  for (const key of keysToDelete) {
+    store.delete(key);
   }
 }
 
@@ -49,23 +55,23 @@ export function rateLimit(
     store.set(key, entry);
   }
 
-  // Remove expired timestamps
-  entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
+  // Remove expired timestamps (immutable update)
+  const filtered = entry.timestamps.filter((t) => t > cutoff);
 
-  if (entry.timestamps.length >= limit) {
-    const oldestInWindow = entry.timestamps[0];
+  if (filtered.length >= limit) {
+    store.set(key, { timestamps: filtered });
     return {
       success: false,
       remaining: 0,
-      resetMs: oldestInWindow + windowMs - now,
+      resetMs: filtered[0] + windowMs - now,
     };
   }
 
-  entry.timestamps.push(now);
+  store.set(key, { timestamps: [...filtered, now] });
 
   return {
     success: true,
-    remaining: limit - entry.timestamps.length,
+    remaining: limit - filtered.length - 1,
     resetMs: windowMs,
   };
 }

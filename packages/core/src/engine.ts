@@ -135,7 +135,7 @@ export class ConversationEngine {
       leadUpdate,
       shouldEscalate,
       escalationReason: shouldEscalate
-        ? this.getEscalationReason(intent, userMessage)
+        ? this.getEscalationReason(intent)
         : undefined,
       shouldBook,
       tokensUsed: {
@@ -189,10 +189,7 @@ export class ConversationEngine {
     return false;
   }
 
-  private getEscalationReason(
-    intent: DetectedIntent,
-    _message: string
-  ): string {
+  private getEscalationReason(intent: DetectedIntent): string {
     const reasonMap: Record<string, string> = {
       speak_to_human: "Customer requested to speak with a human",
       urgent_medical: "Urgent medical situation detected",
