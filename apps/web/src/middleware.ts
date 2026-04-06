@@ -1,5 +1,8 @@
-import { auth } from "@/lib/auth";
+import NextAuth from "next-auth";
+import { authConfig } from "@/auth.config";
 import { NextResponse } from "next/server";
+
+const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -8,10 +11,10 @@ export default auth((req) => {
   const publicPaths = [
     "/login",
     "/api/auth",
-    "/api/chat",           // Widget chat endpoint (has its own API key auth later)
-    "/api/widget/config",  // Widget config endpoint
-    "/api/voice/incoming", // Twilio webhook (has signature validation)
-    "/api/voice/process",  // Twilio webhook
+    "/api/chat",
+    "/api/widget/config",
+    "/api/voice/incoming",
+    "/api/voice/process",
     "/demo",
     "/",
   ];
@@ -24,9 +27,7 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  // Protected routes — require authentication
   if (!req.auth) {
-    // API routes get JSON 401; pages get redirected to login
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
         { success: false, data: null, error: "Unauthorized" },
@@ -43,7 +44,6 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    // Match all paths except static files and Next.js internals
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

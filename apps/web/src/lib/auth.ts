@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import { prisma } from "@ai-receptionist/db";
+import { authConfig } from "@/auth.config";
 
 interface SessionBusiness {
   userId: string;
@@ -36,9 +37,7 @@ export async function getSessionBusiness(): Promise<SessionBusiness | null> {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  pages: {
-    signIn: "/login",
-  },
+  ...authConfig,
   session: {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60, // 30 days
@@ -88,23 +87,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.role = user.role;
-        token.businessId = user.businessId;
-        token.businessSlug = user.businessSlug;
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.sub ?? "";
-        session.user.role = token.role as string | undefined;
-        session.user.businessId = token.businessId as string | null | undefined;
-        session.user.businessSlug = token.businessSlug as string | null | undefined;
-      }
-      return session;
-    },
-  },
 });
