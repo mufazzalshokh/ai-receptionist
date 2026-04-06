@@ -1,7 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { redirect } from "next/navigation";
 import { vividermConfig } from "@ai-receptionist/config";
+import { getSessionBusiness } from "@/lib/auth";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const session = await getSessionBusiness();
+  if (!session) redirect("/login");
+
+  // MVP: static config for vividerm; production: load config from DB by session.businessSlug
   const config = vividermConfig;
 
   return (
@@ -84,7 +90,7 @@ export default function SettingsPage() {
 {`<!-- AI Receptionist Widget -->
 <script
   src="${process.env.NEXT_PUBLIC_WIDGET_URL ?? "https://your-domain.com"}/widget.js"
-  data-business-id="vividerm"
+  data-business-id="${session.businessSlug}"
   data-language="lv"
   data-color="#6366f1"
   async

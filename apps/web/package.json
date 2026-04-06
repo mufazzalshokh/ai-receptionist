@@ -29,6 +29,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@ai-receptionist/widget": "workspace:*",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/bcryptjs": "^3.0.0",
     "@types/node": "^22.0.0",

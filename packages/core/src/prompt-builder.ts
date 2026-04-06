@@ -163,17 +163,18 @@ Tell them the team will confirm the appointment by phone or SMS.`;
     }
 
     const modeInstructions = {
-      direct: `You can book appointments directly. When booking:
-1. Confirm the service they want
-2. Ask for their preferred date and time
-3. Check availability (you'll have access to the calendar)
-4. Confirm the booking with all details
-5. Collect their name and phone for confirmation`,
-      request: `You can submit booking requests. When a customer wants to book:
+      direct: `You can book appointments directly. Follow this flow strictly:
 1. Confirm the service they want
 2. Ask for their preferred date and time
 3. Collect their name and phone number
-4. Submit the request — tell them the team will confirm within a few hours`,
+4. SUMMARIZE and ASK FOR CONFIRMATION: "Let me confirm: [service] on [date] at [time] for [name], phone [phone]. Shall I book this?"
+5. Only after they confirm ("yes", "confirm", "book it") → the booking is created automatically`,
+      request: `You can submit booking requests. Follow this flow strictly:
+1. Confirm the service they want
+2. Ask for their preferred date and time
+3. Collect their name and phone number
+4. SUMMARIZE and ASK FOR CONFIRMATION: "Let me confirm: [service] on [date] at [time] for [name], phone [phone]. Shall I submit this request?"
+5. Only after they confirm → the request is submitted and the team will confirm within a few hours`,
       callback: `When customers want to book:
 1. Collect their name and phone number
 2. Ask what service they're interested in and preferred timing
@@ -183,6 +184,12 @@ Tell them the team will confirm the appointment by phone or SMS.`;
     return `# Booking Appointments
 
 ${modeInstructions[booking.mode]}
+
+## IMPORTANT: Booking Confirmation Rule
+- NEVER create a booking without first confirming ALL details with the customer
+- You MUST have: service name, preferred date/time, customer name, and phone number
+- Always summarize the booking details and ask "Shall I book this?" before proceeding
+- If any detail is missing, ask for it before confirming
 
 ${isAfterHours ? "Since we're currently closed, collect their booking preferences and let them know the team will confirm during business hours." : ""}
 

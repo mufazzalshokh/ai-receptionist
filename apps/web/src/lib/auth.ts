@@ -3,6 +3,38 @@ import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import { prisma } from "@ai-receptionist/db";
 
+interface SessionBusiness {
+  userId: string;
+  businessId: string;
+  businessSlug: string;
+}
+
+export async function getSessionBusiness(): Promise<SessionBusiness | null> {
+  const session = await auth();
+  if (!session?.user?.id) return null;
+
+  const businessId = session.user.businessId;
+  const businessSlug = session.user.businessSlug;
+
+  if (businessId && businessSlug) {
+    return { userId: session.user.id, businessId, businessSlug };
+  }
+
+  // JWT claims missing — look up the user's linked business from DB
+  const link = await prisma.userBusiness.findFirst({
+    where: { userId: session.user.id },
+    include: { business: { select: { id: true, slug: true } } },
+  });
+
+  if (!link) return null;
+
+  return {
+    userId: session.user.id,
+    businessId: link.business.id,
+    businessSlug: link.business.slug,
+  };
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: {
     signIn: "/login",

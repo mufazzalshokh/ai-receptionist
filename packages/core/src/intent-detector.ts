@@ -7,6 +7,11 @@ const INTENT_PATTERNS: Record<UserIntent, Record<SupportedLanguage, readonly str
     lv: ["pierakstīties", "pieraksts", "vizīte", "rezervēt", "laiks", "brīvs", "atnākt", "ierasties"],
     ru: ["записаться", "запись", "визит", "забронировать", "время", "свободно", "прийти", "записать"],
   },
+  booking_confirm: {
+    en: ["yes book", "confirm", "that works", "sounds good", "let's do it", "book it", "perfect", "go ahead", "yes please"],
+    lv: ["apstiprinu", "jā lūdzu", "tā der", "pierakstiet", "lieliski", "uz priekšu"],
+    ru: ["подтверждаю", "да пожалуйста", "подходит", "запишите", "отлично", "давайте"],
+  },
   ask_pricing: {
     en: ["price", "cost", "how much", "fee", "charge", "rate", "expensive", "affordable", "pay", "payment"],
     lv: ["cena", "maksā", "cik", "samaksa", "maksa", "dārgi", "apmaksa", "tarifs"],

@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { vividermConfig } from "@ai-receptionist/config";
+import { getBusinessConfig } from "@ai-receptionist/config";
 import type { WidgetConfig } from "@ai-receptionist/types";
 import { isAfterHours } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const businessId = request.nextUrl.searchParams.get("businessId") ?? "vividerm";
 
-  // MVP: only VividDerm
-  const business = vividermConfig;
+  let business;
+  try {
+    business = getBusinessConfig(businessId);
+  } catch {
+    return NextResponse.json(
+      { success: false, data: null, error: "Unknown business" },
+      { status: 404, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
   const afterHours = isAfterHours(business.hours, business.timezone);
 
   const greeting = afterHours
@@ -16,6 +23,7 @@ export async function GET(request: NextRequest) {
 
   const config: WidgetConfig = {
     businessId,
+    businessName: business.name,
     position: "bottom-right",
     primaryColor: "#6366f1",
     accentColor: "#4f46e5",

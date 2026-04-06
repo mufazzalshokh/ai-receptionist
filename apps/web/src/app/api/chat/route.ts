@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ConversationEngine } from "@ai-receptionist/core";
-import { vividermConfig, vividermKnowledgeBase } from "@ai-receptionist/config";
+import { getBusinessConfig, getKnowledgeBase, findServiceExternalId } from "@ai-receptionist/config";
 import type { SupportedLanguage, ConversationChannel } from "@ai-receptionist/types";
 import { conversationStore } from "@/lib/conversation-store";
 import { isAfterHours, generateId } from "@/lib/utils";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { triggerEscalation } from "@/lib/escalation";
-import { createBookingRequest, notifyStaffOfBooking } from "@/lib/booking";
+import { createBookingRequest, getAvailableSlots, notifyStaffOfBooking } from "@/lib/booking";
 import { createModuleLogger } from "@/lib/logger";
 
 const log = createModuleLogger("chat");
@@ -62,24 +62,43 @@ export async function POST(request: NextRequest) {
     } = parsed.data;
     let { conversationId } = parsed.data;
 
-    // For MVP: only VividDerm config exists
-    const business = vividermConfig;
-    const knowledgeBase = vividermKnowledgeBase;
+    let business;
+    let knowledgeBase;
+    try {
+      business = getBusinessConfig(businessId);
+      knowledgeBase = getKnowledgeBase(businessId);
+    } catch {
+      return jsonResponse(
+        { success: false, data: null, error: "Unknown business" },
+        404,
+        requestOrigin
+      );
+    }
 
     // Get or create conversation session
+    const afterHours = isAfterHours(business.hours, business.timezone);
     let session = conversationId
-      ? conversationStore.get(conversationId)
+      ? await conversationStore.getOrLoad(conversationId, afterHours)
       : undefined;
 
     if (!session) {
       conversationId = generateId();
-      session = conversationStore.create({
-        id: conversationId,
-        businessId,
-        channel: channel as ConversationChannel,
-        language: language as SupportedLanguage,
-        isAfterHours: isAfterHours(business.hours, business.timezone),
-      });
+      try {
+        session = await conversationStore.create({
+          id: conversationId,
+          businessSlug: businessId,
+          channel: channel as ConversationChannel,
+          language: language as SupportedLanguage,
+          isAfterHours: afterHours,
+        });
+      } catch (err) {
+        log.error({ err }, "Failed to create conversation");
+        return jsonResponse(
+          { success: false, data: null, error: "Service temporarily unavailable. Please try again." },
+          503,
+          requestOrigin
+        );
+      }
     }
 
     // Store user message
@@ -90,14 +109,16 @@ export async function POST(request: NextRequest) {
       language: session.language,
       timestamp: new Date(),
     };
-    conversationStore.addMessage(session.id, userMessage);
+    await conversationStore.addMessage(session.id, userMessage).catch((err) => {
+      log.error({ err, sessionId: session.id }, "Failed to persist user message");
+    });
 
     // Process with AI engine
     const response = await engine.processMessage(
       message,
       {
         id: session.id,
-        businessId: session.businessId,
+        businessId: session.businessSlug,
         channel: session.channel,
         language: session.language,
         messages: session.messages,
@@ -122,22 +143,30 @@ export async function POST(request: NextRequest) {
         tokensUsed: response.tokensUsed,
       },
     };
-    conversationStore.addMessage(session.id, assistantMessage);
+    await conversationStore.addMessage(session.id, assistantMessage).catch((err) => {
+      log.error({ err, sessionId: session.id }, "Failed to persist assistant message");
+    });
 
-    // Update session state
+    // Update session state (non-critical — log errors but don't fail the request)
     if (response.language !== session.language) {
-      conversationStore.updateLanguage(session.id, response.language);
+      await conversationStore.updateLanguage(session.id, response.language).catch((err) => {
+        log.error({ err, sessionId: session.id }, "Failed to update language");
+      });
     }
     if (response.leadUpdate) {
-      conversationStore.updateLead(session.id, response.leadUpdate);
+      await conversationStore.updateLead(session.id, response.leadUpdate).catch((err) => {
+        log.error({ err, sessionId: session.id }, "Failed to update lead");
+      });
     }
-    conversationStore.addIntent(session.id, response.intent);
+    await conversationStore.addIntent(session.id, response.intent).catch((err) => {
+      log.error({ err, sessionId: session.id }, "Failed to persist intent");
+    });
 
     // Trigger escalation if needed (async, non-blocking)
     if (response.shouldEscalate) {
       void triggerEscalation(
         {
-          businessId: session.businessId,
+          businessId: session.businessSlug,
           conversationId: session.id,
           reason: (response.escalationReason ?? "customer_request") as import("@ai-receptionist/types").EscalationReason,
           customerName: session.lead.name,
@@ -150,28 +179,57 @@ export async function POST(request: NextRequest) {
       ).catch(() => {});
     }
 
-    // Handle booking intent (async, non-blocking)
+    // Handle booking intent
     let bookingResult: { success: boolean; bookingId?: string } | null = null;
-    if (response.shouldBook && session.lead.name && session.lead.phone) {
-      const bookingRequest = {
-        conversationId: session.id,
-        customerName: session.lead.name,
-        customerPhone: session.lead.phone,
-        customerEmail: session.lead.email,
-        service: response.bookingDetails?.service ?? session.lead.interests?.[0] ?? "Consultation",
-        preferredDate: response.bookingDetails?.date,
-        preferredTime: response.bookingDetails?.time,
-        notes: `AI-booked via ${session.channel}. Language: ${response.language}`,
-      };
+    let availableSlots: import("@ai-receptionist/types").BookingSlot[] = [];
 
-      bookingResult = await createBookingRequest(bookingRequest).catch(() => null);
+    const isBookingIntent = response.intent.intent === "book_appointment"
+      || response.intent.intent === "booking_confirm";
 
-      // Notify staff about the booking request
-      if (business.escalation.contacts[0]?.phone) {
-        void notifyStaffOfBooking(
-          bookingRequest,
-          business.escalation.contacts[0].phone
-        ).catch(() => {});
+    if (isBookingIntent && business.bookingSystem) {
+      const serviceName = response.bookingDetails?.service
+        ?? session.lead.interests?.[0]
+        ?? "Consultation";
+
+      // Fetch available slots for context (non-blocking on failure)
+      const companyId = business.bookingSystem.calendarId;
+      if (companyId) {
+        const serviceExternalId = findServiceExternalId(businessId, serviceName) ?? undefined;
+        availableSlots = await getAvailableSlots(
+          companyId,
+          serviceExternalId,
+          undefined,
+          response.bookingDetails?.date
+        ).catch(() => []);
+      }
+
+      // Only create booking when we have confirmed details + lead info
+      const hasLeadInfo = session.lead.name && session.lead.phone;
+      const hasConfirmedSlot = response.bookingDetails?.date || response.bookingDetails?.time;
+      const isConfirmed = response.intent.intent === "booking_confirm"
+        || (response.shouldBook && hasConfirmedSlot);
+
+      if (isConfirmed && hasLeadInfo) {
+        const bookingRequest = {
+          conversationId: session.id,
+          customerName: session.lead.name!,
+          customerPhone: session.lead.phone!,
+          customerEmail: session.lead.email,
+          service: serviceName,
+          preferredDate: response.bookingDetails?.date,
+          preferredTime: response.bookingDetails?.time,
+          notes: `AI-booked via ${session.channel}. Language: ${response.language}`,
+        };
+
+        bookingResult = await createBookingRequest(bookingRequest, businessId).catch(() => null);
+
+        // Notify staff about the booking request
+        if (business.escalation.contacts[0]?.phone) {
+          void notifyStaffOfBooking(
+            bookingRequest,
+            business.escalation.contacts[0].phone
+          ).catch(() => {});
+        }
       }
     }
 
@@ -187,6 +245,13 @@ export async function POST(request: NextRequest) {
           escalationReason: response.escalationReason,
           bookingCreated: bookingResult?.success ?? false,
           bookingId: bookingResult?.bookingId ?? null,
+          availableSlots: availableSlots.length > 0
+            ? availableSlots.slice(0, 5).map((s) => ({
+                datetime: s.datetime.toISOString(),
+                duration: s.duration,
+                specialist: s.specialist,
+              }))
+            : undefined,
         },
         error: null,
       },

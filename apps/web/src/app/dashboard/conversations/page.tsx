@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
+import { fetchApi } from "@/lib/api-client";
 
 interface ConversationSummary {
   id: string;
@@ -19,13 +20,18 @@ interface ConversationSummary {
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/conversations?businessId=vividerm")
-      .then((r) => r.json())
+    fetchApi<ConversationSummary[]>("/api/conversations")
       .then((data) => {
-        if (data.success) setConversations(data.data);
+        if (data.success && data.data) {
+          setConversations(data.data);
+        } else if (data.error) {
+          setError(data.error);
+        }
       })
+      .catch(() => setError("Failed to load conversations"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -40,6 +46,12 @@ export default function ConversationsPage() {
 
       {loading ? (
         <p className="text-sm text-slate-400">Loading...</p>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-sm text-red-600">{error}</p>
+          </CardContent>
+        </Card>
       ) : conversations.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">

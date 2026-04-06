@@ -1,33 +1,39 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma } from "@ai-receptionist/db";
+import { getSessionBusiness } from "@/lib/auth";
 
-async function getStats() {
+async function getStats(businessSlug: string) {
   const business = await prisma.business.findUnique({
-    where: { slug: "vividerm" },
+    where: { slug: businessSlug },
     select: { id: true },
   });
 
   if (!business) {
-    return { conversations: 0, conversationsToday: 0, leads: 0, hotLeads: 0, escalations: 0 };
+    return { conversations: 0, conversationsToday: 0, leads: 0, hotLeads: 0, escalations: 0, bookings: 0 };
   }
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const [conversations, conversationsToday, leads, hotLeads, escalations] = await Promise.all([
+  const [conversations, conversationsToday, leads, hotLeads, escalations, bookings] = await Promise.all([
     prisma.conversation.count({ where: { businessId: business.id } }),
     prisma.conversation.count({ where: { businessId: business.id, createdAt: { gte: todayStart } } }),
     prisma.lead.count({ where: { businessId: business.id } }),
     prisma.lead.count({ where: { businessId: business.id, score: "hot" } }),
     prisma.escalation.count({ where: { businessId: business.id } }),
+    prisma.booking.count({ where: { businessId: business.id } }),
   ]);
 
-  return { conversations, conversationsToday, leads, hotLeads, escalations };
+  return { conversations, conversationsToday, leads, hotLeads, escalations, bookings };
 }
 
 export default async function DashboardPage() {
-  const stats = await getStats();
+  const session = await getSessionBusiness();
+  if (!session) redirect("/login");
+
+  const stats = await getStats(session.businessSlug);
 
   return (
     <div>
@@ -52,8 +58,8 @@ export default async function DashboardPage() {
         />
         <StatCard
           title="Appointments Booked"
-          value="0"
-          subtitle="Booking integration pending"
+          value={String(stats.bookings)}
+          subtitle={stats.bookings === 0 ? "No bookings yet" : "Via AI receptionist"}
         />
         <StatCard
           title="Escalations"

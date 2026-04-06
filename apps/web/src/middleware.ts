@@ -26,6 +26,13 @@ export default auth((req) => {
 
   // Protected routes — require authentication
   if (!req.auth) {
+    // API routes get JSON 401; pages get redirected to login
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { success: false, data: null, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);

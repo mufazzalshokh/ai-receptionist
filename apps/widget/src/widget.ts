@@ -14,6 +14,7 @@
 
 interface WidgetConfig {
   businessId: string;
+  businessName: string;
   language: string;
   color: string;
   position: string;
@@ -35,6 +36,7 @@ interface Message {
   const scriptTag = document.currentScript as HTMLScriptElement | null;
   const config: WidgetConfig = {
     businessId: scriptTag?.getAttribute("data-business-id") ?? "vividerm",
+    businessName: scriptTag?.getAttribute("data-business-name") ?? "",
     language: scriptTag?.getAttribute("data-language") ?? "en",
     color: scriptTag?.getAttribute("data-color") ?? "#6366f1",
     position: scriptTag?.getAttribute("data-position") ?? "bottom-right",
@@ -146,9 +148,9 @@ interface Message {
       <div id="ai-rcpt-window">
         <div id="ai-rcpt-header">
           <div id="ai-rcpt-header-info">
-            <div id="ai-rcpt-avatar">V</div>
+            <div id="ai-rcpt-avatar">${config.businessName.charAt(0).toUpperCase()}</div>
             <div id="ai-rcpt-header-text">
-              <h3>VIVIDERM</h3>
+              <h3>${escapeHtml(config.businessName)}</h3>
               <p>Virtual Assistant</p>
             </div>
           </div>
@@ -328,7 +330,34 @@ interface Message {
     }
   }
 
-  function bootstrap() {
+  async function bootstrap() {
+    // Fetch server config (best-effort — falls back to data attributes / defaults)
+    try {
+      const res = await fetch(
+        `${config.apiUrl}/api/widget/config?businessId=${encodeURIComponent(config.businessId)}`
+      );
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const d = json.data;
+          if (d.businessName) config.businessName = d.businessName;
+          if (d.greeting) GREETINGS[config.language] = d.greeting;
+          if (d.primaryColor && !scriptTag?.getAttribute("data-color")) config.color = d.primaryColor;
+          if (d.language && !scriptTag?.getAttribute("data-language")) {
+            config.language = d.language;
+            currentLanguage = d.language;
+          }
+        }
+      }
+    } catch {
+      // Config fetch failed — proceed with defaults
+    }
+
+    // Derive display name from config or businessId
+    if (!config.businessName) {
+      config.businessName = config.businessId.charAt(0).toUpperCase() + config.businessId.slice(1);
+    }
+
     injectStyles();
     createWidget();
   }

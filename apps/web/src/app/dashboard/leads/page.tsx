@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { fetchApi } from "@/lib/api-client";
 
 interface LeadSummary {
   conversationId: string;
@@ -27,13 +28,18 @@ const SCORE_COLORS = {
 export default function LeadsPage() {
   const [leads, setLeads] = useState<LeadSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/leads?businessId=vividerm")
-      .then((r) => r.json())
+    fetchApi<LeadSummary[]>("/api/leads")
       .then((data) => {
-        if (data.success) setLeads(data.data);
+        if (data.success && data.data) {
+          setLeads(data.data);
+        } else if (data.error) {
+          setError(data.error);
+        }
       })
+      .catch(() => setError("Failed to load leads"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -48,6 +54,12 @@ export default function LeadsPage() {
 
       {loading ? (
         <p className="text-sm text-slate-400">Loading...</p>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-sm text-red-600">{error}</p>
+          </CardContent>
+        </Card>
       ) : leads.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">

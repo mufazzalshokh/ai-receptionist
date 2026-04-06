@@ -1,14 +1,23 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@ai-receptionist/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getSessionBusiness } from "@/lib/auth";
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
 export default async function ConversationDetailPage({ params }: PageProps) {
+  const session = await getSessionBusiness();
+  if (!session) redirect("/login");
+
   const { id } = await params;
+
+  const business = await prisma.business.findUnique({
+    where: { slug: session.businessSlug },
+    select: { id: true },
+  });
 
   const conversation = await prisma.conversation.findUnique({
     where: { id },
@@ -18,7 +27,8 @@ export default async function ConversationDetailPage({ params }: PageProps) {
     },
   });
 
-  if (!conversation) {
+  // Guard: conversation must exist and belong to the session's business
+  if (!conversation || !business || conversation.businessId !== business.id) {
     notFound();
   }
 

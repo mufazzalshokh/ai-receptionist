@@ -85,6 +85,9 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@ai-receptionist/widget':
+        specifier: workspace:*
+        version: link:../widget
       '@tailwindcss/postcss':
         specifier: ^4.0.0
         version: 4.2.2

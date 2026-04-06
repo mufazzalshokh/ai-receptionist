@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Receptionist Widget Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #f8fafc; color: #1e293b; }
+    .demo-header { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 20px 32px; }
+    .demo-header h1 { font-size: 20px; font-weight: 700; }
+    .demo-header p { font-size: 14px; color: #64748b; margin-top: 4px; }
+    .demo-controls { max-width: 600px; margin: 32px auto; background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .demo-controls h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 13px; font-weight: 500; color: #475569; margin-bottom: 4px; }
+    .field input, .field select { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+    .field input:focus, .field select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
+    .btn { display: inline-block; padding: 10px 20px; background: #6366f1; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; }
+    .btn:hover { background: #4f46e5; }
+    .embed-code { margin-top: 24px; background: #1e293b; border-radius: 8px; padding: 16px; }
+    .embed-code pre { color: #a5f3fc; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+    .demo-content { max-width: 600px; margin: 32px auto; text-align: center; color: #64748b; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="demo-header">
+    <h1>AI Receptionist Widget Demo</h1>
+    <p>Configure and test the embeddable chat widget</p>
+  </div>
+
+  <div class="demo-controls">
+    <h2>Widget Configuration</h2>
+    <div class="field">
+      <label for="business-id">Business ID</label>
+      <input id="business-id" type="text" value="vividerm" />
+    </div>
+    <div class="field">
+      <label for="language">Default Language</label>
+      <select id="language">
+        <option value="en">English</option>
+        <option value="lv">Latvian</option>
+        <option value="ru">Russian</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="color">Primary Color</label>
+      <input id="color" type="color" value="#6366f1" />
+    </div>
+    <div class="field">
+      <label for="position">Position</label>
+      <select id="position">
+        <option value="bottom-right">Bottom Right</option>
+        <option value="bottom-left">Bottom Left</option>
+      </select>
+    </div>
+    <button class="btn" onclick="reloadWidget()">Reload Widget</button>
+
+    <div class="embed-code">
+      <pre id="embed-code"></pre>
+    </div>
+  </div>
+
+  <div class="demo-content">
+    <p>The widget should appear in the bottom-right corner. Click the chat bubble to open it.</p>
+  </div>
+
+  <script>
+    function getBaseUrl() {
+      return window.location.origin;
+    }
+
+    function updateEmbedCode() {
+      var biz = document.getElementById('business-id').value;
+      var lang = document.getElementById('language').value;
+      var color = document.getElementById('color').value;
+      var pos = document.getElementById('position').value;
+      var base = getBaseUrl();
+      document.getElementById('embed-code').textContent =
+        '<script src="' + base + '/widget.js"\n' +
+        '  data-business-id="' + biz + '"\n' +
+        '  data-language="' + lang + '"\n' +
+        '  data-color="' + color + '"\n' +
+        '  data-position="' + pos + '"\n' +
+        '  async><\/script>';
+    }
+
+    function reloadWidget() {
+      // Remove existing widget
+      var container = document.getElementById('ai-rcpt-container');
+      if (container) container.remove();
+      var oldScript = document.getElementById('widget-script');
+      if (oldScript) oldScript.remove();
+      // Reset global flag
+      window.__ai_receptionist_loaded = false;
+
+      // Load fresh
+      var s = document.createElement('script');
+      s.id = 'widget-script';
+      s.src = getBaseUrl() + '/widget.js?t=' + Date.now();
+      s.setAttribute('data-business-id', document.getElementById('business-id').value);
+      s.setAttribute('data-language', document.getElementById('language').value);
+      s.setAttribute('data-color', document.getElementById('color').value);
+      s.setAttribute('data-position', document.getElementById('position').value);
+      s.async = true;
+      document.body.appendChild(s);
+      updateEmbedCode();
+    }
+
+    // Auto-update embed code on input change
+    ['business-id', 'language', 'color', 'position'].forEach(function(id) {
+      document.getElementById(id).addEventListener('input', updateEmbedCode);
+      document.getElementById(id).addEventListener('change', updateEmbedCode);
+    });
+
+    // Initial load
+    updateEmbedCode();
+    reloadWidget();
+  </script>
+</body>
+</html>

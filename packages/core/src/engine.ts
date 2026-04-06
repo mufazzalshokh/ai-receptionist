@@ -126,7 +126,8 @@ export class ConversationEngine {
 
     // 8. Check if booking intent
     const shouldBook =
-      intent.intent === "book_appointment" && intent.confidence > 0.7;
+      (intent.intent === "book_appointment" || intent.intent === "booking_confirm")
+      && intent.confidence > 0.7;
 
     return {
       message: assistantMessage,

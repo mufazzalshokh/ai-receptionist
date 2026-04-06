@@ -1,4 +1,5 @@
 import type { BookingRequest, BookingSlot } from "@ai-receptionist/types";
+import { prisma } from "@ai-receptionist/db";
 import { createModuleLogger } from "@/lib/logger";
 
 const log = createModuleLogger("booking");
@@ -67,60 +68,120 @@ export async function getAvailableSlots(
 }
 
 export async function createBookingRequest(
-  request: BookingRequest
+  request: BookingRequest,
+  businessSlug: string = "vividerm"
 ): Promise<{ success: boolean; bookingId?: string }> {
   const apiKey = process.env.ALTEG_API_KEY;
   const companyId = process.env.ALTEG_COMPANY_ID;
 
-  if (!companyId) {
-    log.info({ request }, "Booking request captured (no company ID, manual processing)");
-    return { success: true, bookingId: `manual-${Date.now()}` };
-  }
+  let externalId: string | undefined;
+  let status = "pending";
 
-  if (!apiKey) {
-    // Fallback: log the booking request for manual processing
-    log.info({ request }, "Booking request captured (no API key, manual processing)");
-    return {
-      success: true,
-      bookingId: `manual-${Date.now()}`,
-    };
-  }
+  if (!apiKey || !companyId) {
+    log.info({ request }, "Booking request captured (manual processing)");
+    externalId = `manual-${Date.now()}`;
+  } else {
+    try {
+      const response = await fetch(
+        `${ALTEG_BASE_URL}/book_record/${companyId}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/vnd.yclients.v2+json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            phone: request.customerPhone,
+            fullname: request.customerName,
+            email: request.customerEmail ?? "",
+            comment: `AI Receptionist booking. Service: ${request.service}. ${request.notes ?? ""}`,
+            notify_by_sms: 1,
+            notify_by_email: request.customerEmail ? 1 : 0,
+          }),
+        }
+      );
 
-  try {
-    const response = await fetch(
-      `${ALTEG_BASE_URL}/book_record/${companyId}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/vnd.yclients.v2+json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          phone: request.customerPhone,
-          fullname: request.customerName,
-          email: request.customerEmail ?? "",
-          comment: `AI Receptionist booking. Service: ${request.service}. ${request.notes ?? ""}`,
-          notify_by_sms: 1,
-          notify_by_email: request.customerEmail ? 1 : 0,
-        }),
+      if (!response.ok) {
+        log.error({ status: response.status }, "Alteg API error creating booking");
+        return { success: false };
       }
-    );
 
-    if (!response.ok) {
-      log.error({ status: response.status }, "Alteg API error creating booking");
+      const data = await response.json();
+      externalId = data.data?.record_id?.toString();
+      status = "confirmed";
+    } catch (error) {
+      log.error({ err: error }, "Failed to create booking via Alteg");
       return { success: false };
     }
-
-    const data = await response.json();
-    return {
-      success: true,
-      bookingId: data.data?.record_id?.toString(),
-    };
-  } catch (error) {
-    log.error({ err: error }, "Failed to create booking");
-    return { success: false };
   }
+
+  // Persist booking to local DB
+  const bookingId = await persistBooking(request, businessSlug, externalId, status);
+
+  return { success: true, bookingId: bookingId ?? externalId };
+}
+
+async function persistBooking(
+  request: BookingRequest,
+  businessSlug: string,
+  externalId: string | undefined,
+  status: string
+): Promise<string | null> {
+  try {
+    const business = await prisma.business.findUnique({
+      where: { slug: businessSlug },
+      select: { id: true },
+    });
+    if (!business) return null;
+
+    // Link to lead if conversation exists
+    const lead = request.conversationId
+      ? await prisma.lead.findUnique({
+          where: { conversationId: request.conversationId },
+          select: { id: true },
+        })
+      : null;
+
+    const booking = await prisma.booking.create({
+      data: {
+        businessId: business.id,
+        leadId: lead?.id ?? null,
+        service: request.service,
+        specialist: request.specialist ?? null,
+        scheduledAt: parseScheduledAt(request.preferredDate, request.preferredTime),
+        duration: 60,
+        status,
+        customerName: request.customerName,
+        customerPhone: request.customerPhone,
+        customerEmail: request.customerEmail ?? null,
+        notes: request.notes ?? null,
+        externalId: externalId ?? null,
+      },
+    });
+
+    log.info({ bookingId: booking.id, externalId }, "Booking persisted to DB");
+    return booking.id;
+  } catch (err) {
+    log.error({ err }, "Failed to persist booking to DB");
+    return null;
+  }
+}
+
+function parseScheduledAt(date?: string, time?: string): Date {
+  if (date && time) {
+    const parsed = new Date(`${date}T${time}`);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+  if (date) {
+    const parsed = new Date(date);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+  // Default: next business day 10:00 as placeholder for staff to confirm
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  next.setHours(10, 0, 0, 0);
+  return next;
 }
 
 /**

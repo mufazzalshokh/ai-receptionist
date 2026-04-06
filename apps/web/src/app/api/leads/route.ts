@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@ai-receptionist/db";
+import { getSessionBusiness } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const businessSlug = request.nextUrl.searchParams.get("businessId") ?? "vividerm";
+  const session = await getSessionBusiness();
+  if (!session) {
+    return NextResponse.json(
+      { success: false, data: null, error: "Unauthorized" },
+      { status: 401 }
+    );
+  }
+
   const page = Math.max(1, parseInt(request.nextUrl.searchParams.get("page") ?? "1", 10));
   const limit = Math.min(100, Math.max(1, parseInt(request.nextUrl.searchParams.get("limit") ?? "50", 10)));
   const offset = (page - 1) * limit;
 
   const business = await prisma.business.findUnique({
-    where: { slug: businessSlug },
+    where: { slug: session.businessSlug },
     select: { id: true },
   });
 

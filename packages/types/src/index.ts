@@ -113,6 +113,7 @@ export interface Conversation {
 
 export type UserIntent =
   | "book_appointment"
+  | "booking_confirm"
   | "ask_question"
   | "ask_pricing"
   | "ask_services"
@@ -237,6 +238,7 @@ export interface ServiceItem {
   readonly currency: string;
   readonly duration?: number; // minutes
   readonly category: string;
+  readonly externalId?: string; // ID in external booking system (e.g., Alteg service ID)
 }
 
 // --- Knowledge Base ---
@@ -297,6 +299,7 @@ export interface VoiceSessionMetrics {
 
 export interface WidgetConfig {
   readonly businessId: string;
+  readonly businessName: string;
   readonly position: "bottom-right" | "bottom-left";
   readonly primaryColor: string;
   readonly accentColor: string;

@@ -1,11 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@ai-receptionist/db";
+import { getSessionBusiness } from "@/lib/auth";
 
-export async function GET(request: NextRequest) {
-  const businessSlug = request.nextUrl.searchParams.get("businessId") ?? "vividerm";
+export async function GET() {
+  const session = await getSessionBusiness();
+  if (!session) {
+    return NextResponse.json(
+      { success: false, data: null, error: "Unauthorized" },
+      { status: 401 }
+    );
+  }
 
   const business = await prisma.business.findUnique({
-    where: { slug: businessSlug },
+    where: { slug: session.businessSlug },
     select: { id: true },
   });
 

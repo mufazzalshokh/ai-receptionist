@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConversationEngine } from "@ai-receptionist/core";
-import { vividermConfig, vividermKnowledgeBase } from "@ai-receptionist/config";
+import { getBusinessConfig, getKnowledgeBase } from "@ai-receptionist/config";
 import { conversationStore } from "@/lib/conversation-store";
 import { isAfterHours, generateId } from "@/lib/utils";
 import { createModuleLogger } from "@/lib/logger";
@@ -39,19 +39,23 @@ export async function POST(request: NextRequest) {
 
   try {
     // Get or create conversation for this call
-    let session = conversationStore.get(callSid);
+    const businessSlug = "vividerm"; // TODO: derive from Twilio phone number mapping
+    const business = getBusinessConfig(businessSlug);
+    const knowledgeBase = getKnowledgeBase(businessSlug);
+    const afterHours = isAfterHours(business.hours, business.timezone);
+    let session = await conversationStore.getOrLoad(callSid, afterHours);
     if (!session) {
-      session = conversationStore.create({
+      session = await conversationStore.create({
         id: callSid,
-        businessId: "vividerm",
+        businessSlug: businessSlug,
         channel: "voice",
         language: "en",
-        isAfterHours: isAfterHours(vividermConfig.hours, vividermConfig.timezone),
+        isAfterHours: afterHours,
       });
     }
 
     // Store user message
-    conversationStore.addMessage(callSid, {
+    await conversationStore.addMessage(callSid, {
       id: generateId(),
       role: "user",
       content: speechResult,
@@ -64,7 +68,7 @@ export async function POST(request: NextRequest) {
       speechResult,
       {
         id: session.id,
-        businessId: session.businessId,
+        businessId: session.businessSlug,
         channel: session.channel,
         language: session.language,
         messages: session.messages,
@@ -73,12 +77,12 @@ export async function POST(request: NextRequest) {
         isAfterHours: session.isAfterHours,
         createdAt: session.createdAt,
       },
-      vividermConfig,
-      vividermKnowledgeBase
+      business,
+      knowledgeBase
     );
 
     // Store assistant message
-    conversationStore.addMessage(callSid, {
+    await conversationStore.addMessage(callSid, {
       id: generateId(),
       role: "assistant",
       content: response.message,
@@ -88,7 +92,7 @@ export async function POST(request: NextRequest) {
 
     // Update lead info
     if (response.leadUpdate) {
-      conversationStore.updateLead(callSid, response.leadUpdate);
+      await conversationStore.updateLead(callSid, response.leadUpdate);
     }
 
     // Check if should escalate — transfer to human
@@ -98,7 +102,7 @@ export async function POST(request: NextRequest) {
   <Say voice="Polly.Joanna">${escapeXml(response.message)}</Say>
   <Say voice="Polly.Joanna">Let me connect you with our team. One moment please.</Say>
   <Dial timeout="30" callerId="${process.env.TWILIO_PHONE_NUMBER ?? ""}">
-    ${vividermConfig.contact.phone}
+    ${business.contact.phone}
   </Dial>
   <Say voice="Polly.Joanna">I'm sorry, our team is currently unavailable. Please try calling us directly at +371 23 444 401. Goodbye!</Say>
 </Response>`;
