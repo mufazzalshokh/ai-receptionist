@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "cd ../.. && pnpm install",
-  "buildCommand": "cd ../.. && pnpm --filter @ai-receptionist/db generate && pnpm --filter @ai-receptionist/types build && pnpm --filter @ai-receptionist/core build && pnpm --filter @ai-receptionist/config build && cd apps/web && pnpm build",
-  "outputDirectory": "apps/web/.next",
+  "buildCommand": "cd ../../packages/db && npx prisma generate && cd ../../apps/web && npx next build",
+  "outputDirectory": ".next",
   "headers": [
     {
       "source": "/widget.js",
