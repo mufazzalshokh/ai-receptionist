@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBusinessConfig } from "@ai-receptionist/config";
-import type { WidgetConfig } from "@ai-receptionist/types";
+import type { WidgetConfig, BusinessConfig } from "@ai-receptionist/types";
 import { isAfterHours } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const businessId = request.nextUrl.searchParams.get("businessId") ?? "vividerm";
 
-  let business;
+  let business: BusinessConfig;
   try {
     business = getBusinessConfig(businessId);
   } catch {

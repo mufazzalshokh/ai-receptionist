@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ConversationEngine } from "@ai-receptionist/core";
 import { getBusinessConfig, getKnowledgeBase, findServiceExternalId } from "@ai-receptionist/config";
-import type { SupportedLanguage, ConversationChannel } from "@ai-receptionist/types";
+import type { SupportedLanguage, ConversationChannel, BusinessConfig, KnowledgeBase } from "@ai-receptionist/types";
 import { conversationStore } from "@/lib/conversation-store";
 import { isAfterHours, generateId } from "@/lib/utils";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
@@ -62,8 +62,8 @@ export async function POST(request: NextRequest) {
     } = parsed.data;
     let { conversationId } = parsed.data;
 
-    let business;
-    let knowledgeBase;
+    let business: BusinessConfig;
+    let knowledgeBase: KnowledgeBase;
     try {
       business = getBusinessConfig(businessId);
       knowledgeBase = getKnowledgeBase(businessId);
