@@ -27,24 +27,26 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const [conversations, total] = await Promise.all([
-    prisma.conversation.findMany({
-      where: { businessId: business.id },
-      orderBy: { updatedAt: "desc" },
-      skip: offset,
-      take: limit,
-      include: {
-        messages: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-          select: { content: true, role: true, createdAt: true },
-        },
-        lead: {
-          select: { name: true, phone: true, email: true, score: true, status: true },
-        },
-        _count: { select: { messages: true } },
+  const conversationQuery = {
+    where: { businessId: business.id },
+    orderBy: { updatedAt: "desc" },
+    skip: offset,
+    take: limit,
+    include: {
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { content: true, role: true, createdAt: true },
       },
-    }),
+      lead: {
+        select: { name: true, phone: true, email: true, score: true, status: true },
+      },
+      _count: { select: { messages: true } },
+    },
+  } as const;
+
+  const [conversations, total] = await Promise.all([
+    prisma.conversation.findMany(conversationQuery),
     prisma.conversation.count({ where: { businessId: business.id } }),
   ]);
 
