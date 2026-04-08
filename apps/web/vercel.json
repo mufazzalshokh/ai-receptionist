@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install",
-  "buildCommand": "cd ../../packages/db && npx prisma generate && cd ../../apps/web && npx next build",
+  "buildCommand": "cd ../../packages/db && npx prisma generate && cd ../../apps/web && npx next build && find ../../node_modules -name 'libquery_engine-rhel-openssl-3.0.x.so.node' -exec cp {} .next/server/ \\;",
   "outputDirectory": ".next",
   "headers": [
     {
